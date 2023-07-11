@@ -11,6 +11,8 @@ public class Dependencies {
     
     public static let shared = Dependencies()
     
+    private lazy var queue = DispatchQueue(label: "\(type(of: self)).\(UUID().uuidString)", qos: .userInteractive)
+    
     private var registry: [HashKey: Factory] = [:]
 }
 
@@ -29,6 +31,7 @@ public extension Dependencies {
         private let factory: Factory
         private let key: HashKey
         private let dependencies: Dependencies
+        private let queue = DispatchQueue(label: "Dependencies.Options.\(UUID().uuidString)", qos: .userInteractive)
         
         fileprivate init(_ factory: Factory, key: HashKey, dependencies: Dependencies) {
             self.factory = factory
@@ -38,14 +41,18 @@ public extension Dependencies {
         
         @discardableResult
         public func scope(_ scope: Dependencies.Scope) -> Self {
-            factory.scope = scope
+            queue.sync {
+                factory.scope = scope
+            }
             return self
         }
         
         @discardableResult
         public func implements<T>(_ type: T.Type) -> Self {
             let key = key.with(type)
-            dependencies.registry[key] = factory
+            queue.sync {
+                dependencies.registry[key] = factory
+            }
             return Options(factory, key: key, dependencies: dependencies)
         }
     }
@@ -68,10 +75,12 @@ public extension Dependencies {
     
     func optional<Service>(_ type: Service.Type, name: Name? = nil) -> Service? {
         let key = HashKey(type, name: name)
-        guard let factory = registry[key], let instance: Service = factory.get() else {
-            return nil
+        return queue.sync {
+            guard let factory = registry[key], let instance: Service = factory.get() else {
+                return nil
+            }
+            return instance
         }
-        return instance
     }
     
     func optional<Service>(name: Name? = nil) -> Service? {
@@ -87,7 +96,9 @@ public extension Dependencies {
     func register<Service>(_ create: @escaping () -> Service, as type: Service.Type, name: Name? = nil) -> Dependencies.Options<Service> {
         let key = HashKey(type, name: name)
         let factory = Factory(create: create, scope: .transient)
-        registry[key] = factory
+        queue.sync {
+            registry[key] = factory
+        }
         return Dependencies.Options(factory, key: key, dependencies: self)
     }
     
@@ -100,22 +111,28 @@ public extension Dependencies {
     func register<Service>(_ instance: Service, as type: Service.Type, name: Name? = nil) -> Dependencies.Options<Service> {
         let key = HashKey(type, name: name)
         let factory = Factory(create: { instance }, instance: instance, scope: .singleton)
-        registry[key] = factory
+        queue.sync {
+            registry[key] = factory
+        }
         return Dependencies.Options(factory, key: key, dependencies: self)
     }
     
     func clearCache(id: Scope.CacheID) {
-        registry.values.forEach({ factory in
-            guard case .cached(let factoryId) = factory.scope, factoryId == id else { return }
-            factory.instance = nil
-        })
+        queue.sync {
+            registry.values.forEach({ factory in
+                guard case .cached(let factoryId) = factory.scope, factoryId == id else { return }
+                factory.instance = nil
+            })
+        }
     }
     
     func clearCache() {
-        registry.values.forEach({ factory in
-            guard case .cached = factory.scope else { return }
-            factory.instance = nil
-        })
+        queue.sync {
+            registry.values.forEach({ factory in
+                guard case .cached = factory.scope else { return }
+                factory.instance = nil
+            })
+        }
     }
 }
 
