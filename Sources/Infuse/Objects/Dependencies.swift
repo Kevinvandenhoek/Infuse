@@ -27,15 +27,26 @@ public extension Dependencies {
     struct Options<Service> {
         
         private let factory: Factory
+        private let key: HashKey
+        private let dependencies: Dependencies
         
-        fileprivate init(_ factory: Factory) {
+        fileprivate init(_ factory: Factory, key: HashKey, dependencies: Dependencies) {
             self.factory = factory
+            self.key = key
+            self.dependencies = dependencies
         }
         
         @discardableResult
         public func scope(_ scope: Dependencies.Scope) -> Self {
             factory.scope = scope
             return self
+        }
+        
+        @discardableResult
+        public func implements<T>(_ type: T.Type) -> Self {
+            let key = key.with(type)
+            dependencies.registry[key] = factory
+            return Options(factory, key: key, dependencies: dependencies)
         }
     }
     
@@ -77,7 +88,7 @@ public extension Dependencies {
         let key = HashKey(type, name: name)
         let factory = Factory(create: create, scope: .transient)
         registry[key] = factory
-        return Dependencies.Options(factory)
+        return Dependencies.Options(factory, key: key, dependencies: self)
     }
     
     @discardableResult
@@ -90,7 +101,7 @@ public extension Dependencies {
         let key = HashKey(type, name: name)
         let factory = Factory(create: { instance }, instance: instance, scope: .singleton)
         registry[key] = factory
-        return Dependencies.Options(factory)
+        return Dependencies.Options(factory, key: key, dependencies: self)
     }
     
     func clearCache(id: Scope.CacheID) {
@@ -294,5 +305,9 @@ private struct HashKey: Hashable {
     init<Service>(_ type: Service.Type, name: Dependencies.Name? = nil) {
         self.identifier = ObjectIdentifier(type)
         self.name = name
+    }
+    
+    func with<Service>(_ type: Service.Type) -> Self {
+        return .init(type, name: name)
     }
 }
