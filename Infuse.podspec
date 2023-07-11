@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'Infuse'
-  s.version          = '0.0.5'
+  s.version          = '0.0.6'
   s.summary          = 'A lightweight dependency injection library'
   s.homepage         = 'https://github.com/Kevinvandenhoek/Infuse.git'
   s.license          = { :type => 'MIT', :file => 'LICENSE.md' }

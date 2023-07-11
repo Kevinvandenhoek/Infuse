@@ -11,7 +11,7 @@ public class Dependencies {
     
     public static let shared = Dependencies()
     
-    private lazy var queue = DispatchQueue(label: "\(type(of: self)).\(UUID().uuidString)", qos: .userInteractive)
+    private let lock = NSLock()
     
     private var registry: [HashKey: Factory] = [:]
 }
@@ -31,7 +31,7 @@ public extension Dependencies {
         private let factory: Factory
         private let key: HashKey
         private let dependencies: Dependencies
-        private let queue = DispatchQueue(label: "Dependencies.Options.\(UUID().uuidString)", qos: .userInteractive)
+        private let lock = NSLock()
         
         fileprivate init(_ factory: Factory, key: HashKey, dependencies: Dependencies) {
             self.factory = factory
@@ -41,18 +41,16 @@ public extension Dependencies {
         
         @discardableResult
         public func scope(_ scope: Dependencies.Scope) -> Self {
-            queue.sync {
-                factory.scope = scope
-            }
+            lock.lock()
+            factory.scope = scope
+            lock.unlock()
             return self
         }
         
         @discardableResult
         public func implements<T>(_ type: T.Type) -> Self {
             let key = key.with(type)
-            queue.sync {
-                dependencies.registry[key] = factory
-            }
+            dependencies.set(factory, for: key)
             return Options(factory, key: key, dependencies: dependencies)
         }
     }
@@ -61,6 +59,12 @@ public extension Dependencies {
 }
 
 public extension Dependencies {
+    
+    private func set(_ factory: Factory, for key: HashKey) {
+        lock.lock()
+        registry[key] = factory
+        lock.unlock()
+    }
     
     func get<Service>(_ type: Service.Type, name: Name? = nil) -> Service {
         guard let service: Service = optional(type, name: name) else {
@@ -75,12 +79,13 @@ public extension Dependencies {
     
     func optional<Service>(_ type: Service.Type, name: Name? = nil) -> Service? {
         let key = HashKey(type, name: name)
-        return queue.sync {
-            guard let factory = registry[key], let instance: Service = factory.get() else {
-                return nil
-            }
-            return instance
+        lock.lock()
+        guard let factory = registry[key], let instance: Service = factory.get() else {
+            lock.unlock()
+            return nil
         }
+        lock.unlock()
+        return instance
     }
     
     func optional<Service>(name: Name? = nil) -> Service? {
@@ -96,9 +101,9 @@ public extension Dependencies {
     func register<Service>(_ create: @escaping () -> Service, as type: Service.Type, name: Name? = nil) -> Dependencies.Options<Service> {
         let key = HashKey(type, name: name)
         let factory = Factory(create: create, scope: .transient)
-        queue.sync {
-            registry[key] = factory
-        }
+        lock.lock()
+        registry[key] = factory
+        lock.unlock()
         return Dependencies.Options(factory, key: key, dependencies: self)
     }
     
@@ -111,28 +116,28 @@ public extension Dependencies {
     func register<Service>(_ instance: Service, as type: Service.Type, name: Name? = nil) -> Dependencies.Options<Service> {
         let key = HashKey(type, name: name)
         let factory = Factory(create: { instance }, instance: instance, scope: .singleton)
-        queue.sync {
-            registry[key] = factory
-        }
+        lock.lock()
+        registry[key] = factory
+        lock.unlock()
         return Dependencies.Options(factory, key: key, dependencies: self)
     }
     
     func clearCache(id: Scope.CacheID) {
-        queue.sync {
-            registry.values.forEach({ factory in
-                guard case .cached(let factoryId) = factory.scope, factoryId == id else { return }
-                factory.instance = nil
-            })
-        }
+        lock.lock()
+        registry.values.forEach({ factory in
+            guard case .cached(let factoryId) = factory.scope, factoryId == id else { return }
+            factory.instance = nil
+        })
+        lock.unlock()
     }
     
     func clearCache() {
-        queue.sync {
-            registry.values.forEach({ factory in
-                guard case .cached = factory.scope else { return }
-                factory.instance = nil
-            })
-        }
+        lock.lock()
+        registry.values.forEach({ factory in
+            guard case .cached = factory.scope else { return }
+            factory.instance = nil
+        })
+        lock.unlock()
     }
 }
 
