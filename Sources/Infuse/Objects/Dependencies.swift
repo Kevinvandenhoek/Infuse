@@ -21,7 +21,7 @@ public extension Dependencies {
         
         case transient
         case singleton
-        case cached(id: CacheID?)
+        case cached(id: CacheID? = nil)
     }
     
     struct Options<Service> {
@@ -45,15 +45,26 @@ public extension Dependencies {
 public extension Dependencies {
     
     func get<Service>(_ type: Service.Type, name: Name? = nil) -> Service {
-        let key = HashKey(type, name: name)
-        guard let factory = registry[key] else {
+        guard let service: Service = optional(type, name: name) else {
             fatalError("No registration for \(type)")
         }
-        return factory.get()
+        return service
     }
     
     func get<Service>(name: Name? = nil) -> Service {
         return get(Service.self, name: name)
+    }
+    
+    func optional<Service>(_ type: Service.Type, name: Name? = nil) -> Service? {
+        let key = HashKey(type, name: name)
+        guard let factory = registry[key], let instance: Service = factory.get() else {
+            return nil
+        }
+        return instance
+    }
+    
+    func optional<Service>(name: Name? = nil) -> Service? {
+        return optional(Service.self, name: name)
     }
     
     @discardableResult
@@ -261,7 +272,7 @@ private class Factory {
         self.scope = scope
     }
     
-    func get<T>() -> T {
+    func get<T>() -> T? {
         switch scope {
         case .singleton, .cached:
             if let instance = instance as? T { return instance }
@@ -269,7 +280,7 @@ private class Factory {
             break
         }
         
-        guard let instance = create() as? T else { fatalError("Factory produced wrong type for \(T.self), produced \(String(describing: create()))") }
+        let instance = create() as? T
         self.instance = instance
         return instance
     }
