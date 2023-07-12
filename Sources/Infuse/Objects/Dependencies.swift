@@ -1,25 +1,27 @@
 //
 //  Dependencies.swift
-//  
+//
 //
 //  Created by Kevin van den Hoek on 11/07/2023.
 //
 
 import Foundation
 
+@discardableResult
+private func syncSafe<T>(_ work: () -> T) -> T {
+    guard !Thread.isMainThread else {
+        return work()
+    }
+    
+    return DispatchQueue.main.sync {
+        return work()
+    }
+}
+
 private class ThreadLock {
     
-    private let lock = NSLock()
-    private var currentThread: Thread?
-    
     func performWithLock<T>(work: () -> T) -> T {
-        guard currentThread != Thread.current else { return work() }
-        lock.lock()
-        currentThread = Thread.current
-        let result = work()
-        lock.unlock()
-        currentThread = nil
-        return result
+        return syncSafe { work() }
     }
 }
 
