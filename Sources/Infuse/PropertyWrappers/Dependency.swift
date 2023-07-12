@@ -21,7 +21,7 @@ public struct Dependency<T> {
     public var wrappedValue: T {
         if let value = storage.value { return value }
         
-        let instance = Dependencies.shared.get(T.self)
+        let instance = Dependencies.shared.get(T.self, name: name)
         storage.value = instance
         return instance
     }

@@ -42,6 +42,15 @@ public extension Dependencies {
         case transient
         case singleton
         case cached(id: CacheID? = nil)
+        
+        var shouldCache: Bool {
+            switch self {
+            case .cached, .singleton:
+                return true
+            case .transient:
+                return false
+            }
+        }
     }
     
     struct Options<Service> {
@@ -323,15 +332,10 @@ private class Factory {
     }
     
     func get<T>() -> T? {
-        switch scope {
-        case .singleton, .cached:
-            if let instance = instance as? T { return instance }
-        case .transient:
-            break
-        }
+        if scope.shouldCache, let instance = instance as? T { return instance }
         
         let instance = create() as? T
-        self.instance = instance
+        if scope.shouldCache { self.instance = instance }
         return instance
     }
 }
