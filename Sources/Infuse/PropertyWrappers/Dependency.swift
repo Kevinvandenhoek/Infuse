@@ -16,6 +16,7 @@ public struct Dependency<T> {
     
     private let storage = Storage()
     private let resolution: Resolution
+    private let name: Dependencies.Name?
     
     public var wrappedValue: T {
         if let value = storage.value { return value }
@@ -25,8 +26,9 @@ public struct Dependency<T> {
         return instance
     }
     
-    public init(_ resolution: Resolution = .lazy) {
+    public init(_ resolution: Resolution = .lazy, name: Dependencies.Name? = nil) {
         self.resolution = resolution
+        self.name = name
         switch resolution {
         case .instant:
             _ = wrappedValue // Trigger resolving
