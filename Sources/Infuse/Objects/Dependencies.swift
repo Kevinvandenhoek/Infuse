@@ -133,21 +133,6 @@ public extension Dependencies {
         return Dependencies.Options(factory, key: key, dependencies: self)
     }
     
-    @discardableResult
-    func register<Service>(_ instance: Service, name: Name? = nil) -> Dependencies.Options<Service> {
-        return register(instance, as: Service.self, name: name)
-    }
-    
-    @discardableResult
-    func register<Service>(_ instance: Service, as type: Service.Type, name: Name? = nil) -> Dependencies.Options<Service> {
-        let key = HashKey(type, name: name)
-        let factory = Factory(create: { instance }, instance: instance, scope: .singleton)
-        lock.performWithLock {
-            registry[key] = factory
-        }
-        return Dependencies.Options(factory, key: key, dependencies: self)
-    }
-    
     func clearCache(id: Scope.CacheID) {
         lock.performWithLock {
             registry.values.forEach({ factory in
