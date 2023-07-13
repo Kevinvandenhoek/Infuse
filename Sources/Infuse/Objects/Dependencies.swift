@@ -150,6 +150,13 @@ public extension Dependencies {
             })
         }
     }
+    
+    /// Completely reset the registry, meaning all registrations and factories will be cleared.
+    func reset() {
+        lock.performWithLock {
+            registry = [:]
+        }
+    }
 }
 
 public extension Dependencies {
