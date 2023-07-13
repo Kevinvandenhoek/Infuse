@@ -119,12 +119,12 @@ public extension Dependencies {
     }
     
     @discardableResult
-    func register<Service>(_ create: @escaping () -> Service, name: Name? = nil) -> Dependencies.Options<Service> {
-        return register(create, as: Service.self, name: name)
+    func register<Service>(name: Name? = nil, _ create: @escaping () -> Service) -> Dependencies.Options<Service> {
+        return register(Service.self, name: name, create)
     }
     
     @discardableResult
-    func register<Service>(_ create: @escaping () -> Service, as type: Service.Type, name: Name? = nil) -> Dependencies.Options<Service> {
+    func register<Service>(_ type: Service.Type, name: Name? = nil, _ create: @escaping () -> Service) -> Dependencies.Options<Service> {
         let key = HashKey(type, name: name)
         let factory = Factory(create: create, scope: .transient)
         lock.performWithLock {

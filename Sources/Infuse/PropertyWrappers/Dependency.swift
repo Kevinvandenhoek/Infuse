@@ -19,11 +19,16 @@ public struct Dependency<T> {
     private let name: Dependencies.Name?
     
     public var wrappedValue: T {
-        if let value = storage.value { return value }
-        
-        let instance = Dependencies.shared.get(T.self, name: name)
-        storage.value = instance
-        return instance
+        get {
+            if let value = storage.value { return value }
+            
+            let instance = Dependencies.shared.get(T.self, name: name)
+            storage.value = instance
+            return instance
+        }
+        set {
+            storage.value = newValue
+        }
     }
     
     public init(_ resolution: Resolution = .lazy, name: Dependencies.Name? = nil) {
