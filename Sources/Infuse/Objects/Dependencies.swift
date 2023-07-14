@@ -20,14 +20,36 @@ private func syncSafe<T>(_ work: () -> T) -> T {
 
 private class ThreadLock {
     
-    func performWithLock<T>(work: () -> T) -> T {
-        return syncSafe { work() }
+    let lock = NSRecursiveLock()
+    var enableLogging: Bool = false
+    
+    private var lockHolder: String = ""
+    
+    func performWithLock<T>(id: String, work: () -> T) -> T {
+        if enableLogging {
+            print("💉 will lock for \(id), currently held by \(lockHolder)")
+        }
+        lock.lock()
+        if enableLogging {
+            lockHolder = id
+        }
+        let result = work()
+        if enableLogging {
+            lockHolder = "💉 completedWork from \(id)"
+        }
+        lock.unlock()
+        return result
     }
 }
 
 public class Dependencies {
     
     public static let shared = Dependencies()
+    
+    public var enableLogging: Bool {
+        get { lock.enableLogging }
+        set { lock.enableLogging = newValue }
+    }
     
     private let lock = ThreadLock()
     
@@ -67,17 +89,17 @@ public extension Dependencies {
         }
         
         @discardableResult
-        public func scope(_ scope: Dependencies.Scope) -> Self {
-            lock.performWithLock {
+        public func scope(_ scope: Dependencies.Scope, file: String = #file, line: Int = #line) -> Self {
+            lock.performWithLock(id: "\(file) - \(line)") {
                 factory.scope = scope
             }
             return self
         }
         
         @discardableResult
-        public func implements<T>(_ type: T.Type) -> Self {
+        public func implements<T>(_ type: T.Type, file: String = #file, line: Int = #line) -> Self {
             let key = key.with(type)
-            dependencies.set(factory, for: key)
+            dependencies.set(factory, for: key, file: file, line: line)
             return Options(factory, key: key, dependencies: dependencies)
         }
     }
@@ -87,14 +109,14 @@ public extension Dependencies {
 
 public extension Dependencies {
     
-    private func set(_ factory: Factory, for key: HashKey) {
-        lock.performWithLock {
+    private func set(_ factory: Factory, for key: HashKey, file: String = #file, line: Int = #line) {
+        lock.performWithLock(id: "\(file) - \(line)") {
             registry[key] = factory
         }
     }
     
-    func get<Service>(_ type: Service.Type, name: Name? = nil) -> Service {
-        guard let service: Service = optional(type, name: name) else {
+    func get<Service>(_ type: Service.Type, name: Name? = nil, file: String = #file, line: Int = #line) -> Service {
+        guard let service: Service = optional(type, name: name, file: file, line: line) else {
             fatalError("No registration for \(type)")
         }
         return service
@@ -104,9 +126,9 @@ public extension Dependencies {
         return get(Service.self, name: name)
     }
     
-    func optional<Service>(_ type: Service.Type, name: Name? = nil) -> Service? {
+    func optional<Service>(_ type: Service.Type, name: Name? = nil, file: String = #file, line: Int = #line) -> Service? {
         let key = HashKey(type, name: name)
-        return lock.performWithLock {
+        return lock.performWithLock(id: "\(file) - \(line)") {
             guard let factory = registry[key], let instance: Service = factory.get() else {
                 return nil
             }
@@ -124,17 +146,17 @@ public extension Dependencies {
     }
     
     @discardableResult
-    func register<Service>(_ type: Service.Type, name: Name? = nil, _ create: @escaping () -> Service) -> Dependencies.Options<Service> {
+    func register<Service>(_ type: Service.Type, name: Name? = nil, file: String = #file, line: Int = #line, _ create: @escaping () -> Service) -> Dependencies.Options<Service> {
         let key = HashKey(type, name: name)
         let factory = Factory(create: create, scope: .transient)
-        lock.performWithLock {
+        lock.performWithLock(id: "\(file) - \(line)") {
             registry[key] = factory
         }
         return Dependencies.Options(factory, key: key, dependencies: self)
     }
     
-    func clearCache(id: Scope.CacheID) {
-        lock.performWithLock {
+    func clearCache(id: Scope.CacheID, file: String = #file, line: Int = #line) {
+        lock.performWithLock(id: "\(file) - \(line)") {
             registry.values.forEach({ factory in
                 guard case .cached(let factoryId) = factory.scope, factoryId == id else { return }
                 factory.instance = nil
@@ -142,8 +164,8 @@ public extension Dependencies {
         }
     }
     
-    func clearCache() {
-        lock.performWithLock {
+    func clearCache(file: String = #file, line: Int = #line) {
+        lock.performWithLock(id: "\(file) - \(line)") {
             registry.values.forEach({ factory in
                 guard case .cached = factory.scope else { return }
                 factory.instance = nil
@@ -152,8 +174,8 @@ public extension Dependencies {
     }
     
     /// Completely reset the registry, meaning all registrations and factories will be cleared.
-    func reset() {
-        lock.performWithLock {
+    func reset(file: String = #file, line: Int = #line) {
+        lock.performWithLock(id: "\(file) - \(line)") {
             registry = [:]
         }
     }
