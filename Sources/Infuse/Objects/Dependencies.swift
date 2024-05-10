@@ -22,10 +22,14 @@ private class ThreadLock {
     
     let lock = NSRecursiveLock()
     var enableLogging: Bool = false
+    var forceMainThread: Bool = false
     
     private var lockHolder: String = ""
     
     func performWithLock<T>(id: String, work: () -> T) -> T {
+        guard !forceMainThread else {
+            return syncSafe { work() }
+        }
         if enableLogging {
             print("💉 will lock for \(id), currently held by \(lockHolder)")
         }
@@ -35,7 +39,8 @@ private class ThreadLock {
         }
         let result = work()
         if enableLogging {
-            lockHolder = "💉 completedWork from \(id)"
+            lockHolder = "none"
+            print("💉 completedWork from \(id)")
         }
         lock.unlock()
         return result
@@ -49,6 +54,11 @@ public class Dependencies {
     public var enableLogging: Bool {
         get { lock.enableLogging }
         set { lock.enableLogging = newValue }
+    }
+    
+    public var forceMainThread: Bool {
+        get { lock.forceMainThread }
+        set { lock.forceMainThread = newValue }
     }
     
     private let lock = ThreadLock()
@@ -90,7 +100,7 @@ public extension Dependencies {
         
         @discardableResult
         public func scope(_ scope: Dependencies.Scope, file: String = #file, line: Int = #line) -> Self {
-            lock.performWithLock(id: "\(file) - \(line)") {
+            lock.performWithLock(id: "\(file.split(separator: "/").last ?? "") - \(line)") {
                 factory.scope = scope
             }
             return self
