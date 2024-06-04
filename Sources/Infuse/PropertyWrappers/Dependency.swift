@@ -10,40 +10,35 @@ import Foundation
 @propertyWrapper
 public struct Dependency<T> {
     
-    private class Storage {
-        var value: T? = nil
-    }
-    
-    private let storage = Storage()
+    private let storage: Storage
     private let resolution: Resolution
-    private let name: Dependencies.Name?
-    
-    private let file: String
-    private let line: Int
     
     public var wrappedValue: T {
         get {
-            if let value = storage.value { return value }
-            
-            let instance = Dependencies.shared.get(T.self, name: name, file: file, line: line)
-            storage.value = instance
-            return instance
+            switch storage {
+            case .instant(let value):
+                return value
+            case .lazy(let storageContainer):
+                return storageContainer.get()
+            }
         }
         set {
-            storage.value = newValue
+            switch storage {
+            case .instant(let value):
+                assertionFailure("overwriting value not supported for dependencies with instant resolution")
+            case .lazy(let storageContainer):
+                storageContainer.value = newValue
+            }
         }
     }
     
-    public init(_ resolution: Resolution = .lazy, name: Dependencies.Name? = nil, file: String = #file, line: Int = #line) {
+    public init(_ resolution: Resolution = .instant, name: Dependencies.Name? = nil, file: String = #file, line: Int = #line) {
         self.resolution = resolution
-        self.name = name
-        self.file = file
-        self.line = line
         switch resolution {
         case .instant:
-            _ = wrappedValue // Trigger resolving
+            storage = .instant(Dependencies.shared.get(T.self, name: name, file: file, line: line))
         case .lazy:
-            break
+            storage = .lazy(StorageContainer(name: name, file: file, line: line))
         }
     }
 }
@@ -53,5 +48,33 @@ public extension Dependency {
     enum Resolution {
         case lazy
         case instant
+    }
+    
+    private enum Storage {
+        case instant(T)
+        case lazy(StorageContainer)
+    }
+    
+    private class StorageContainer {
+        let name: Dependencies.Name?
+        let file: String
+        let line: Int
+        var value: T? = nil
+        
+        init(name: Dependencies.Name?, file: String, line: Int) {
+            self.name = name
+            self.file = file
+            self.line = line
+        }
+        
+        func get() -> T {
+            if let value {
+                return value
+            } else {
+                let value = Dependencies.shared.get(T.self, name: name, file: file, line: line)
+                self.value = value
+                return value
+            }
+        }
     }
 }
