@@ -32,7 +32,7 @@ public struct Dependency<T> {
         }
     }
     
-    public init(_ resolution: Resolution = .instant, name: Dependencies.Name? = nil, file: String = #file, line: Int = #line) {
+    public init(_ resolution: Resolution = .lazy, name: Dependencies.Name? = nil, file: String = #file, line: Int = #line) {
         self.resolution = resolution
         switch resolution {
         case .instant:
