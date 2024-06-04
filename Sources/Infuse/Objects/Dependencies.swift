@@ -127,7 +127,7 @@ public extension Dependencies {
     
     func get<Service>(_ type: Service.Type, name: Name? = nil, file: String = #file, line: Int = #line) -> Service {
         guard let service: Service = optional(type, name: name, file: file, line: line) else {
-            fatalError("No registration for \(type)")
+            fatalError("No registration for \(type), registrations: \(registry.keys.map({ String(describing: $0.identifier) }).joined(separator: ", "))")
         }
         return service
     }
