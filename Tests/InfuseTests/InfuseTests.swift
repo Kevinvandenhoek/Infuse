@@ -19,7 +19,7 @@ final class InfuseTests: XCTestCase {
         #if canImport(InfuseMacros)
         assertMacroExpansion(
             """
-            @Providable(SomeService.self)
+            @Providable(SomeService())
             public protocol SomeWorker { }
             
             struct SomeService: SomeWorker { }
@@ -69,10 +69,12 @@ final class InfuseTests: XCTestCase {
         #if canImport(InfuseMacros)
         assertMacroExpansion(
             """
-            @Providable(SomeService.self)
+            @Providable(SomeService.shared)
             protocol SomeWorker { }
             
-            struct SomeService: SomeWorker { }
+            struct SomeService: SomeWorker {
+                static let shared = SomeService()
+            }
             
             let someWorker = #provided(SomeWorker.self)
             """,
@@ -81,13 +83,51 @@ final class InfuseTests: XCTestCase {
             
             internal struct SomeWorkerProvider {
                 internal static func get() -> SomeWorker {
-                    return SomeService()
+                    return SomeService.shared
                 }
             }
             
-            struct SomeService: SomeWorker { }
+            struct SomeService: SomeWorker {
+                static let shared = SomeService()
+            }
             
             let someWorker = SomeWorkerProvider.get()
+            """,
+            macros: testMacros
+        )
+        #else
+        throw XCTSkip("macros are only supported when running tests for the host platform")
+        #endif
+    }
+    
+    func test_providableMacro_withSingletonStorage_shouldCreateProviderWithStorage() throws {
+        #if canImport(InfuseMacros)
+        assertMacroExpansion(
+            """
+            @Providable(storage: .singleton)
+            struct SomeService { }
+            """,
+            expandedSource: """
+            struct SomeService { }
+
+            internal struct SomeServiceProvider {
+                private static var instance: SomeService?
+                private static let lock = ThreadLock()
+                internal static func get() -> SomeService {
+                    let existing = lock.performWithLock {
+                        instance
+                    }
+                    if let existing {
+                        return existing
+                    } else {
+                        let new = SomeService()
+                        lock.performWithLock {
+                            instance = new
+                        }
+                        return new
+                    }
+                }
+            }
             """,
             macros: testMacros
         )

@@ -9,10 +9,6 @@ public struct ProvidableMacro: PeerMacro {
         print(node)
         print(declaration)
         print(context)
-        let instanceName = {
-            let name = node.arguments?.as(LabeledExprListSyntax.self)?.first?.expression.as(MemberAccessExprSyntax.self)?.base?.as(DeclReferenceExprSyntax.self)?.baseName.trimmed.text
-            return name == "Void" ? nil : name
-        }()
         let registrationName: String
         let accessModifier: String
         if let decl = declaration.as(StructDeclSyntax.self) {
@@ -30,14 +26,72 @@ public struct ProvidableMacro: PeerMacro {
         } else {
             throw "Unsupported type"
         }
-        return [
-            """
-            \(raw: accessModifier) struct \(raw: registrationName)Provider {
-                \(raw: accessModifier) static func get() -> \(raw: registrationName) {
-                    return \(raw: instanceName ?? registrationName)()
-                }
+        let instanceName: String = {
+            if let functionExpression = node.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.first(withLabel: nil)?.expression.as(FunctionCallExprSyntax.self) {
+                    return functionExpression.calledExpression.as(DeclReferenceExprSyntax.self)?.baseName.trimmedDescription
+            } else if let memberExpression = node.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.first(withLabel: nil)?.expression.as(MemberAccessExprSyntax.self) {
+                return memberExpression.base?.as(DeclReferenceExprSyntax.self)?.baseName.trimmedDescription
+            } else {
+                return nil
             }
-            """
+        }() ?? registrationName
+        
+        let createExpression: ExprSyntax = {
+            if let expression = node.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.first(withLabel: nil)?.expression.as(FunctionCallExprSyntax.self) {
+                return "\(expression)"
+            } else if let expression = node.as(AttributeSyntax.self)?.arguments?.as(LabeledExprListSyntax.self)?.first(withLabel: nil)?.expression.as(MemberAccessExprSyntax.self) {
+                return "\(expression)"
+            } else {
+                return "\(raw: instanceName)()"
+            }
+        }()
+        
+        let providerDecl: DeclSyntax = try {
+            if let storage = node.arguments?.as(LabeledExprListSyntax.self)?.first(withLabel: "storage")?.expression.as(MemberAccessExprSyntax.self) {
+                switch storage.declName.baseName.trimmed.text {
+                case "singleton":
+                    return """
+                    \(raw: accessModifier) struct \(raw: registrationName)Provider {
+                        private static var instance: \(raw: instanceName)?
+                        private static let lock = ThreadLock()
+                        \(raw: accessModifier) static func get() -> \(raw: registrationName) {
+                            let existing = lock.performWithLock { instance }
+                            if let existing {
+                                return existing
+                            } else {
+                                let new = \(createExpression)
+                                lock.performWithLock {
+                                    instance = new
+                                }
+                                return new
+                            }
+                        }
+                    }
+                    """
+                case "local":
+                    return """
+                    \(raw: accessModifier) struct \(raw: registrationName)Provider {
+                        \(raw: accessModifier) static func get() -> \(raw: registrationName) {
+                            return \(createExpression)
+                        }
+                    }
+                    """
+                default:
+                    throw "unknown storage type: \(storage)"
+                }
+            } else {
+                return """
+                \(raw: accessModifier) struct \(raw: registrationName)Provider {
+                    \(raw: accessModifier) static func get() -> \(raw: registrationName) {
+                        return \(createExpression)
+                    }
+                }
+                """
+            }
+        }()
+        
+        return [
+            providerDecl
         ]
     }
 }
@@ -64,4 +118,13 @@ struct InfusePlugin: CompilerPlugin {
         ProvidableMacro.self,
         ProvidedMacro.self
     ]
+}
+
+private extension LabeledExprListSyntax {
+    
+    func first(withLabel label: String?) -> LabeledExprSyntax? {
+        return first { element in
+            return element.label?.trimmedDescription == label
+        }
+    }
 }

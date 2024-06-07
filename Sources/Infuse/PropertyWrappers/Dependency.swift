@@ -24,7 +24,7 @@ public struct Dependency<T> {
         }
         set {
             switch storage {
-            case .instant(let value):
+            case .instant:
                 assertionFailure("overwriting value not supported for dependencies with instant resolution")
             case .lazy(let storageContainer):
                 storageContainer.value = newValue
