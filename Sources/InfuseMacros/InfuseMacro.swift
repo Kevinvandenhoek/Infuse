@@ -3,6 +3,52 @@ import SwiftSyntax
 import SwiftSyntaxBuilder
 import SwiftSyntaxMacros
 
+enum StorageBehavior {
+    case singleton
+    case local
+}
+
+private func makeProviderDecl(registrationName: String, instanceName: String, accessModifier: String?, createExpression: ExprSyntax, storage: StorageBehavior) -> DeclSyntax {
+    return {
+        let accessString: String = {
+            if let accessModifier {
+                return "\(accessModifier) "
+            } else {
+                return ""
+            }
+        }()
+        switch storage {
+        case .singleton:
+            return """
+            \(raw: accessString)struct \(raw: registrationName)Provider {
+                private static var instance: \(raw: instanceName)?
+                private static let lock = ThreadLock()
+                \(raw: accessString)static func get() -> \(raw: registrationName) {
+                    let existing = lock.performWithLock { instance }
+                    if let existing {
+                        return existing
+                    } else {
+                        let new = \(createExpression)
+                        lock.performWithLock {
+                            instance = new
+                        }
+                        return new
+                    }
+                }
+            }
+            """
+        case .local:
+            return """
+            \(raw: accessString)struct \(raw: registrationName)Provider {
+                \(raw: accessString)static func get() -> \(raw: registrationName) {
+                    return \(createExpression)
+                }
+            }
+            """
+        }
+    }()
+}
+
 public struct ProvidableMacro: PeerMacro {
     
     public static func expansion(of node: AttributeSyntax, providingPeersOf declaration: some DeclSyntaxProtocol, in context: some MacroExpansionContext) throws -> [DeclSyntax] {
@@ -46,53 +92,85 @@ public struct ProvidableMacro: PeerMacro {
             }
         }()
         
-        let providerDecl: DeclSyntax = try {
-            if let storage = node.arguments?.as(LabeledExprListSyntax.self)?.first(withLabel: "storage")?.expression.as(MemberAccessExprSyntax.self) {
-                switch storage.declName.baseName.trimmed.text {
-                case "singleton":
-                    return """
-                    \(raw: accessModifier) struct \(raw: registrationName)Provider {
-                        private static var instance: \(raw: instanceName)?
-                        private static let lock = ThreadLock()
-                        \(raw: accessModifier) static func get() -> \(raw: registrationName) {
-                            let existing = lock.performWithLock { instance }
-                            if let existing {
-                                return existing
-                            } else {
-                                let new = \(createExpression)
-                                lock.performWithLock {
-                                    instance = new
-                                }
-                                return new
-                            }
-                        }
-                    }
-                    """
-                case "local":
-                    return """
-                    \(raw: accessModifier) struct \(raw: registrationName)Provider {
-                        \(raw: accessModifier) static func get() -> \(raw: registrationName) {
-                            return \(createExpression)
-                        }
-                    }
-                    """
-                default:
-                    throw "unknown storage type: \(storage)"
-                }
+
+        let storage: StorageBehavior = {
+            switch node.arguments?.as(LabeledExprListSyntax.self)?.first(withLabel: "storage")?.expression.as(MemberAccessExprSyntax.self)?.declName.baseName.trimmedDescription {
+            case "singleton":
+                return .singleton
+            case "local":
+                return .local
+            default:
+                return .local
+            }
+        }()
+        return [makeProviderDecl(
+            registrationName: registrationName,
+            instanceName: instanceName,
+            accessModifier: accessModifier,
+            createExpression: createExpression,
+            storage: storage
+        )]
+    }
+}
+
+public struct FreestandingProvidableMacro: DeclarationMacro {
+    
+    public static func expansion(of node: some SwiftSyntax.FreestandingMacroExpansionSyntax, in context: some SwiftSyntaxMacros.MacroExpansionContext) throws -> [SwiftSyntax.DeclSyntax] {
+        guard let args = node.as(MacroExpansionExprSyntax.self)?.arguments else {
+            throw "No args provided"
+        }
+        
+        let registrationName: String?
+        let instanceName: String?
+        if let expr = args.first(withLabel: nil)?.expression.as(AsExprSyntax.self) {
+            registrationName = expr.type.as(IdentifierTypeSyntax.self)?.name.trimmedDescription
+            if let member = expr.expression.as(MemberAccessExprSyntax.self) {
+                instanceName = member.base?.as(DeclReferenceExprSyntax.self)?.baseName.trimmedDescription
+            } else if let function = expr.expression.as(FunctionCallExprSyntax.self) {
+                instanceName = function.calledExpression.as(DeclReferenceExprSyntax.self)?.baseName.trimmedDescription
             } else {
-                return """
-                \(raw: accessModifier) struct \(raw: registrationName)Provider {
-                    \(raw: accessModifier) static func get() -> \(raw: registrationName) {
-                        return \(createExpression)
-                    }
-                }
-                """
+                throw "Unsupported arg"
+            }
+        } else if let expr = args.first(withLabel: nil)?.expression.as(FunctionCallExprSyntax.self) {
+            registrationName = expr.calledExpression.as(DeclReferenceExprSyntax.self)?.baseName.trimmedDescription
+            instanceName = registrationName
+        } else if let expr = args.first(withLabel: nil)?.expression.as(MemberAccessExprSyntax.self) {
+            registrationName = expr.base?.as(DeclReferenceExprSyntax.self)?.baseName.trimmedDescription
+            instanceName = registrationName
+        } else {
+            throw "Unsupported arg"
+        }
+        
+        let createExpression: ExprSyntax = try {
+            if let expr = args.first(withLabel: nil)?.expression {
+                return expr
+            } else {
+                throw "Failed to find create expression"
             }
         }()
         
-        return [
-            providerDecl
-        ]
+        guard let registrationName, let instanceName else {
+            throw "Missing data"
+        }
+        
+        let storage: StorageBehavior = {
+            switch args.as(LabeledExprListSyntax.self)?.first(withLabel: "storage")?.expression.as(MemberAccessExprSyntax.self)?.declName.baseName.trimmedDescription {
+            case "singleton":
+                return .singleton
+            case "local":
+                return .local
+            default:
+                return .local
+            }
+        }()
+        
+        return [makeProviderDecl(
+            registrationName: registrationName,
+            instanceName: instanceName,
+            accessModifier: "public",
+            createExpression: createExpression,
+            storage: storage
+        )]
     }
 }
 
@@ -116,7 +194,8 @@ extension String: Error { }
 struct InfusePlugin: CompilerPlugin {
     let providingMacros: [Macro.Type] = [
         ProvidableMacro.self,
-        ProvidedMacro.self
+        ProvidedMacro.self,
+        FreestandingProvidableMacro.self
     ]
 }
 

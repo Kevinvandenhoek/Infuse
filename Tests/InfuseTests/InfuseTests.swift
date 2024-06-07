@@ -10,7 +10,8 @@ import InfuseMacros
 
 let testMacros: [String: Macro.Type] = [
     "Providable": ProvidableMacro.self,
-    "provided": ProvidedMacro.self
+    "provided": ProvidedMacro.self,
+    "providable": FreestandingProvidableMacro.self
 ]
 #endif
 
@@ -121,6 +122,45 @@ final class InfuseTests: XCTestCase {
                         return existing
                     } else {
                         let new = SomeService()
+                        lock.performWithLock {
+                            instance = new
+                        }
+                        return new
+                    }
+                }
+            }
+            """,
+            macros: testMacros
+        )
+        #else
+        throw XCTSkip("macros are only supported when running tests for the host platform")
+        #endif
+    }
+    
+    func test_freestandingProvidableMacro_withSingletonStorage_shouldCreateProviderWithStorage() throws {
+        #if canImport(InfuseMacros)
+        assertMacroExpansion(
+            """
+            public struct SomeService {
+                static let shared = SomeService()
+            }
+            #providable(SomeService.shared, storage: .singleton)
+            """,
+            expandedSource: """
+            public struct SomeService {
+                static let shared = SomeService()
+            }
+            public struct SomeServiceProvider {
+                private static var instance: SomeService?
+                private static let lock = ThreadLock()
+                public static func get() -> SomeService {
+                    let existing = lock.performWithLock {
+                        instance
+                    }
+                    if let existing {
+                        return existing
+                    } else {
+                        let new = SomeService.shared
                         lock.performWithLock {
                             instance = new
                         }
