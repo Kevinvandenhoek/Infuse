@@ -51,18 +51,6 @@ public class Dependencies {
     
     public static let shared = Dependencies()
     
-    public var enableLogging: Bool {
-        get { lock.enableLogging }
-        set { lock.enableLogging = newValue }
-    }
-    
-    public var forceMainThread: Bool {
-        get { lock.forceMainThread }
-        set { lock.forceMainThread = newValue }
-    }
-    
-    private let lock = ThreadLock()
-    
     private var registry: [HashKey: Factory] = [:]
 }
 
@@ -120,9 +108,7 @@ public extension Dependencies {
 public extension Dependencies {
     
     private func set(_ factory: Factory, for key: HashKey, file: String = #file, line: Int = #line) {
-        lock.performWithLock(id: "\(file) - \(line)") {
-            registry[key] = factory
-        }
+        registry[key] = factory
     }
     
     func get<Service>(_ type: Service.Type, name: Name? = nil, file: String = #file, line: Int = #line) -> Service {
@@ -138,12 +124,10 @@ public extension Dependencies {
     
     func optional<Service>(_ type: Service.Type, name: Name? = nil, file: String = #file, line: Int = #line) -> Service? {
         let key = HashKey(type, name: name)
-        return lock.performWithLock(id: "\(file) - \(line)") {
-            guard let factory = registry[key], let instance: Service = factory.get() else {
-                return nil
-            }
-            return instance
+        guard let factory = registry[key], let instance: Service = factory.get() else {
+            return nil
         }
+        return instance
     }
     
     func optional<Service>(name: Name? = nil) -> Service? {
@@ -159,35 +143,27 @@ public extension Dependencies {
     func register<Service>(_ type: Service.Type, name: Name? = nil, file: String = #file, line: Int = #line, _ create: @escaping () -> Service) -> Dependencies.Options<Service> {
         let key = HashKey(type, name: name)
         let factory = Factory(create: create, scope: .transient)
-        lock.performWithLock(id: "\(file) - \(line)") {
-            registry[key] = factory
-        }
+        registry[key] = factory
         return Dependencies.Options(factory, key: key, dependencies: self)
     }
     
     func clearCache(id: Scope.CacheID, file: String = #file, line: Int = #line) {
-        lock.performWithLock(id: "\(file) - \(line)") {
-            registry.values.forEach({ factory in
-                guard case .cached(let factoryId) = factory.scope, factoryId == id else { return }
-                factory.instance = nil
-            })
-        }
+        registry.values.forEach({ factory in
+            guard case .cached(let factoryId) = factory.scope, factoryId == id else { return }
+            factory.instance = nil
+        })
     }
     
     func clearCache(file: String = #file, line: Int = #line) {
-        lock.performWithLock(id: "\(file) - \(line)") {
-            registry.values.forEach({ factory in
-                guard case .cached = factory.scope else { return }
-                factory.instance = nil
-            })
-        }
+        registry.values.forEach({ factory in
+            guard case .cached = factory.scope else { return }
+            factory.instance = nil
+        })
     }
     
     /// Completely reset the registry, meaning all registrations and factories will be cleared.
     func reset(file: String = #file, line: Int = #line) {
-        lock.performWithLock(id: "\(file) - \(line)") {
-            registry = [:]
-        }
+        registry = [:]
     }
 }
 
@@ -348,6 +324,7 @@ private class Factory {
     private let create: () -> Any
     var instance: Any?
     var scope: Dependencies.Scope
+    private let lock = ThreadLock()
     
     init(create: @escaping () -> Any, instance: Any? = nil, scope: Dependencies.Scope) {
         self.create = create
@@ -355,12 +332,20 @@ private class Factory {
         self.scope = scope
     }
     
-    func get<T>() -> T? {
-        if scope.shouldCache, let instance = instance as? T { return instance }
-        
-        let instance = create() as? T
-        if scope.shouldCache { self.instance = instance }
-        return instance
+    func get<T>(file: String = #file, line: Int = #line) -> T? {
+        if scope.shouldCache {
+            return lock.performWithLock(id: "\(file.split(separator: "/").last ?? "") - \(line)") {
+                if let instance = instance as? T {
+                    return instance
+                } else {
+                    let instance = create() as? T
+                    self.instance = instance
+                    return instance
+                }
+            }
+        } else {
+            return create() as? T
+        }
     }
 }
 
