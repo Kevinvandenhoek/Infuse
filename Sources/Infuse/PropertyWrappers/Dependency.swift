@@ -61,6 +61,8 @@ public extension Dependency {
         let line: Int
         var value: T? = nil
         
+        private let queue = DispatchQueue(label: UUID().uuidString, qos: .userInitiated)
+        
         init(name: Dependencies.Name?, file: String, line: Int) {
             self.name = name
             self.file = file
@@ -68,12 +70,14 @@ public extension Dependency {
         }
         
         func get() -> T {
-            if let value {
+            if let value = queue.sync(execute: { self.value }) {
                 return value
             } else {
-                let value = Dependencies.shared.get(T.self, name: name, file: file, line: line)
-                self.value = value
-                return value
+                return queue.sync {
+                    let value = Dependencies.shared.get(T.self, name: name, file: file, line: line)
+                    self.value = value
+                    return value
+                }
             }
         }
     }
