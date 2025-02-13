@@ -7,54 +7,14 @@
 
 import Foundation
 
-@discardableResult
-private func syncSafe<T>(_ work: () -> T) -> T {
-    guard !Thread.isMainThread else {
-        return work()
-    }
-    
-    return DispatchQueue.main.sync {
-        return work()
-    }
-}
-
-private class ThreadLock {
-    
-    let lock = NSRecursiveLock()
-    var enableLogging: Bool = false
-    var forceMainThread: Bool = false
-    
-    private var lockHolder: String = ""
-    
-    func performWithLock<T>(id: String, work: () -> T) -> T {
-        guard !forceMainThread else {
-            return syncSafe { work() }
-        }
-        if enableLogging {
-            print("💉 will lock for \(id), currently held by \(lockHolder)")
-        }
-        lock.lock()
-        if enableLogging {
-            lockHolder = id
-        }
-        let result = work()
-        if enableLogging {
-            lockHolder = "none"
-            print("💉 completedWork from \(id)")
-        }
-        lock.unlock()
-        return result
-    }
-}
-
-public class Dependencies {
+@MainActor public class Dependencies {
     
     public static let shared = Dependencies()
     
     private var registry: [HashKey: Factory] = [:]
 }
 
-public extension Dependencies {
+@MainActor public extension Dependencies {
     
     enum Scope {
         public typealias CacheID = String
@@ -73,12 +33,11 @@ public extension Dependencies {
         }
     }
     
-    struct Options<Service> {
+    @MainActor struct Options<Service> {
         
         private let factory: Factory
         private let key: HashKey
         private let dependencies: Dependencies
-        private let lock = ThreadLock()
         
         fileprivate init(_ factory: Factory, key: HashKey, dependencies: Dependencies) {
             self.factory = factory
@@ -88,9 +47,7 @@ public extension Dependencies {
         
         @discardableResult
         public func scope(_ scope: Dependencies.Scope, file: String = #file, line: Int = #line) -> Self {
-            lock.performWithLock(id: "\(file.split(separator: "/").last ?? "") - \(line)") {
-                factory.scope = scope
-            }
+            factory.scope = scope
             return self
         }
         
@@ -105,7 +62,7 @@ public extension Dependencies {
     typealias Name = String
 }
 
-public extension Dependencies {
+@MainActor public extension Dependencies {
     
     private func set(_ factory: Factory, for key: HashKey, file: String = #file, line: Int = #line) {
         registry[key] = factory
@@ -167,7 +124,7 @@ public extension Dependencies {
     }
 }
 
-public extension Dependencies {
+@MainActor public extension Dependencies {
     
     private func r<T>() -> T {
         return get(T.self)
@@ -319,12 +276,11 @@ public extension Dependencies {
     }
 }
 
-private class Factory {
+@MainActor private class Factory {
     
     private let create: () -> Any
     var instance: Any?
     var scope: Dependencies.Scope
-    private let lock = ThreadLock()
     
     init(create: @escaping () -> Any, instance: Any? = nil, scope: Dependencies.Scope) {
         self.create = create
@@ -334,14 +290,12 @@ private class Factory {
     
     func get<T>(file: String = #file, line: Int = #line) -> T? {
         if scope.shouldCache {
-            return lock.performWithLock(id: "\(file.split(separator: "/").last ?? "") - \(line)") {
-                if let instance = instance as? T {
-                    return instance
-                } else {
-                    let instance = create() as? T
-                    self.instance = instance
-                    return instance
-                }
+            if let instance = instance as? T {
+                return instance
+            } else {
+                let instance = create() as? T
+                self.instance = instance
+                return instance
             }
         } else {
             return create() as? T
@@ -349,7 +303,7 @@ private class Factory {
     }
 }
 
-private struct HashKey: Hashable {
+@MainActor private struct HashKey: Hashable {
     
     let identifier: ObjectIdentifier
     let name: String?

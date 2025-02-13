@@ -8,7 +8,7 @@
 import Foundation
 
 @propertyWrapper
-public struct Dependency<T> {
+@MainActor public struct Dependency<T> {
     
     private let storage: Storage
     private let resolution: Resolution
@@ -55,7 +55,7 @@ public extension Dependency {
         case lazy(StorageContainer)
     }
     
-    private class StorageContainer {
+    @MainActor private class StorageContainer {
         let name: Dependencies.Name?
         let file: String
         let line: Int
